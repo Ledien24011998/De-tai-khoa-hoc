@@ -1,0 +1,5 @@
+{
+  "name": "FireSafe VN - Hướng dẫn thoát nạn chung cư",
+  "description": "Ứng dụng hướng dẫn thoát nạn khẩn cấp cho cư dân chung cư theo quy chuẩn QCVN 06:2022/BXD. Tích hợp AI đưa ra chỉ dẫn tức thời.",
+  "requestFramePermissions": ["microphone"]
+}
