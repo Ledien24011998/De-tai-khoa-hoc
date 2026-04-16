@@ -26,29 +26,32 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [scenario, setScenario] = useState<FireScenario>({
     floor: "Tầng 1",
-    location: "Trong căn hộ",
+    location: "Tầng thương mại/dịch vụ",
     fireLocation: "Chưa xác định",
     hasSmoke: false,
     isDoorHot: false,
     hasVulnerablePeople: false,
   });
   const [guide, setGuide] = useState<AIResponse | null>(null);
-  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [activeAudioIndex, setActiveAudioIndex] = useState<number | null>(null);
+  const [audioCache, setAudioCache] = useState<Record<number, string>>({});
   const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  const handleFloorChange = (floor: string) => {
+    const newLocation = floor === "Tầng 1" ? "Tầng thương mại/dịch vụ" : "Trong căn hộ";
+    setScenario({ ...scenario, floor, location: newLocation });
+  };
 
   const handleStart = () => setStep("input");
 
   const handleSubmit = async () => {
     setLoading(true);
+    setAudioCache({});
+    setActiveAudioIndex(null);
     try {
       const result = await getFireEscapeGuide(scenario);
       setGuide(result);
       setStep("guide");
-      
-      // Generate voice for the first step or summary
-      const voiceText = result.steps.map(s => s.action).join(". ");
-      const url = await getVoiceGuide(voiceText);
-      setAudioUrl(url);
     } catch (error) {
       console.error("Failed to get guide:", error);
     } finally {
@@ -56,11 +59,38 @@ export default function App() {
     }
   };
 
-  useEffect(() => {
-    if (audioUrl && audioRef.current) {
-      audioRef.current.play();
+  const handleStepClick = async (index: number, text: string) => {
+    if (activeAudioIndex === index && audioRef.current && !audioRef.current.paused) {
+      audioRef.current.pause();
+      setActiveAudioIndex(null);
+      return;
     }
-  }, [audioUrl]);
+
+    if (audioCache[index]) {
+      setActiveAudioIndex(index);
+      return;
+    }
+
+    setActiveAudioIndex(index);
+    try {
+      const url = await getVoiceGuide(text);
+      if (url) {
+        setAudioCache(prev => ({ ...prev, [index]: url }));
+      } else {
+        setActiveAudioIndex(null);
+      }
+    } catch (error) {
+      console.error("TTS Error:", error);
+      setActiveAudioIndex(null);
+    }
+  };
+
+  useEffect(() => {
+    if (activeAudioIndex !== null && audioCache[activeAudioIndex] && audioRef.current) {
+      audioRef.current.src = audioCache[activeAudioIndex];
+      audioRef.current.play().catch(e => console.error("Playback failed:", e));
+    }
+  }, [activeAudioIndex, audioCache]);
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-900">
@@ -119,15 +149,13 @@ export default function App() {
                 <label className="block text-sm font-medium text-slate-700 mb-2">Bạn đang ở tầng mấy?</label>
                 <select 
                   value={scenario.floor}
-                  onChange={(e) => setScenario({...scenario, floor: e.target.value})}
+                  onChange={(e) => handleFloorChange(e.target.value)}
                   className="w-full p-4 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-red-500 outline-none appearance-none"
                 >
-                  <option value="Hầm B3">Hầm B3</option>
-                  <option value="Hầm B2">Hầm B2</option>
-                  <option value="Hầm B1">Hầm B1</option>
-                  {Array.from({ length: 50 }, (_, i) => i + 1).map(f => (
-                    <option key={f} value={`Tầng ${f}`}>{`Tầng ${f}`}</option>
-                  ))}
+                  <option value="Tầng 1">Tầng 1</option>
+                  <option value="Tầng 2 - tầng 4">Tầng 2 - tầng 4</option>
+                  <option value="Tầng 5 - tầng 16">Tầng 5 - tầng 16</option>
+                  <option value="Tầng 16+">Tầng 16+</option>
                 </select>
               </div>
 
@@ -138,10 +166,16 @@ export default function App() {
                   onChange={(e) => setScenario({...scenario, location: e.target.value})}
                   className="w-full p-4 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-red-500 outline-none appearance-none"
                 >
-                  <option>Trong căn hộ</option>
-                  <option>Ngoài hành lang</option>
-                  <option>Trong thang máy</option>
-                  <option>Cầu thang bộ</option>
+                  {scenario.floor === "Tầng 1" ? (
+                    <option>Tầng thương mại/dịch vụ</option>
+                  ) : (
+                    <>
+                      <option>Trong căn hộ</option>
+                      <option>Trong thang máy</option>
+                      <option>Cầu thang bộ</option>
+                      <option>Tầng thương mại/dịch vụ</option>
+                    </>
+                  )}
                 </select>
               </div>
 
@@ -193,7 +227,7 @@ export default function App() {
                 >
                   <div className="flex items-center gap-3">
                     <UserRound className={scenario.hasVulnerablePeople ? 'text-blue-600' : 'text-slate-400'} />
-                    <span className="font-medium">Có trẻ em/người già</span>
+                    <span className="font-medium">Có trẻ em/người già/người bệnh/phụ nữ mang thai</span>
                   </div>
                   <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center ${scenario.hasVulnerablePeople ? 'border-blue-500 bg-white' : 'border-slate-200'}`}>
                     {scenario.hasVulnerablePeople && <div className="w-3 h-3 bg-blue-600 rounded-full" />}
@@ -224,13 +258,7 @@ export default function App() {
                 <ArrowLeft className="w-4 h-4" /> Sửa thông tin
               </button>
               <div className="flex items-center gap-2">
-                <button 
-                  onClick={() => audioRef.current?.play()}
-                  className="p-2 bg-slate-100 rounded-full text-slate-600"
-                >
-                  <Volume2 className="w-5 h-5" />
-                </button>
-                <a href="tel:114" className="p-2 bg-red-600 rounded-full text-white">
+                <a href="tel:114" className="p-2 bg-red-600 rounded-full text-white hover:bg-red-700 active:scale-90 transition-all">
                   <Phone className="w-5 h-5" />
                 </a>
               </div>
@@ -250,17 +278,21 @@ export default function App() {
                   initial={{ opacity: 0, x: -20 }}
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ delay: i * 0.1 }}
-                  className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex gap-4"
+                  onClick={() => handleStepClick(i, s.action)}
+                  className={`p-5 rounded-2xl border transition-all cursor-pointer flex gap-4 ${activeAudioIndex === i ? 'bg-slate-900 text-white border-slate-900 shadow-md scale-[1.02]' : 'bg-white text-slate-900 border-slate-100 shadow-sm hover:border-slate-300'}`}
                 >
-                  <div className="w-8 h-8 bg-slate-900 text-white rounded-full flex items-center justify-center font-bold shrink-0">
-                    {s.step}
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold shrink-0 ${activeAudioIndex === i ? 'bg-white text-slate-900' : 'bg-slate-900 text-white'}`}>
+                    {activeAudioIndex === i && !audioCache[i] ? <Loader2 className="w-4 h-4 animate-spin" /> : s.step}
                   </div>
-                  <div>
-                    <p className="font-bold text-slate-900 leading-tight mb-1">{s.action}</p>
+                  <div className="flex-1">
+                    <p className={`font-bold leading-tight mb-1 ${activeAudioIndex === i ? 'text-white' : 'text-slate-900'}`}>{s.action}</p>
                     {s.condition && (
-                      <p className="text-xs text-slate-500 italic">Lưu ý: {s.condition}</p>
+                      <p className={`text-xs italic ${activeAudioIndex === i ? 'text-slate-300' : 'text-slate-500'}`}>Lưu ý: {s.condition}</p>
                     )}
                   </div>
+                  {activeAudioIndex === i && audioCache[i] && (
+                    <Volume2 className="w-5 h-5 text-white animate-pulse" />
+                  )}
                 </motion.div>
               ))}
             </div>
@@ -280,7 +312,7 @@ export default function App() {
               </a>
             </div>
             
-            {audioUrl && <audio ref={audioRef} src={audioUrl} className="hidden" />}
+            <audio ref={audioRef} onEnded={() => setActiveAudioIndex(null)} className="hidden" />
           </motion.div>
         )}
       </AnimatePresence>
